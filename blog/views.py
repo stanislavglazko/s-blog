@@ -25,23 +25,28 @@ def serialize_tag(tag):
     }
 
 
-def get_tags_and_prefetch():
-    tags = Tag.objects.popular()
+def get_prefetch(tags):
     prefetch = Prefetch('tags', queryset=tags)
-    return tags, prefetch
+    return prefetch
+
+
+def get_most_popular_posts(prefetch):
+    most_popular_posts = Post.objects.popular()\
+                                     .prefetch_related(prefetch)\
+                                     .select_related('author')[:5]\
+                                     .fetch_with_comments_count()
+    return most_popular_posts
 
 
 def index(request):
-    tags, prefetch = get_tags_and_prefetch()
-    most_popular_posts = Post.objects.popular()\
-                                     .prefetch_related(prefetch)\
-                                     .prefetch_related('author')[:5]\
-                                     .fetch_with_comments_count()
+    tags = Tag.objects.popular()
+    prefetch = get_prefetch(tags)
+    most_popular_posts = get_most_popular_posts(prefetch)
 
     fresh_posts = Post.objects.annotate(comments_count=Count('comments'))\
                               .order_by('published_at')\
                               .prefetch_related(prefetch)\
-                              .prefetch_related('author')
+                              .select_related('author')
     most_fresh_posts = list(fresh_posts)[-5:]
 
     most_popular_tags = tags[:5]
@@ -61,7 +66,7 @@ def post_detail(request, slug):
         post = Post.objects.get(slug=slug)
     except Post.DoesNotExist:
         raise Http404('Пост не найден')
-    comments = Comment.objects.prefetch_related('author').filter(post=post)
+    comments = post.comments.select_related('author')
     serialized_comments = []
     for comment in comments:
         serialized_comments.append({
@@ -85,12 +90,10 @@ def post_detail(request, slug):
         'slug': post.slug,
         'tags': [serialize_tag(tag) for tag in related_tags],
     }
-    tags, prefetch = get_tags_and_prefetch()
+    tags = Tag.objects.popular()
+    prefetch = get_prefetch(tags)
+    most_popular_posts = get_most_popular_posts(prefetch)
     most_popular_tags = tags[:5]
-    most_popular_posts = Post.objects.popular()\
-                                     .prefetch_related(prefetch)\
-                                     .prefetch_related('author')[:5]\
-                                     .fetch_with_comments_count()
 
     context = {
         'post': serialized_post,
@@ -107,15 +110,13 @@ def tag_filter(request, tag_title):
         tag = Tag.objects.prefetch_related('posts').get(title=tag_title)
     except Tag.DoesNotExist:
         raise Http404('Тег не найден')
-    tags, prefetch = get_tags_and_prefetch()
+    tags = Tag.objects.popular()
+    prefetch = get_prefetch(tags)
+    most_popular_posts = get_most_popular_posts(prefetch)
     most_popular_tags = tags[:5]
-    most_popular_posts = Post.objects.popular()\
-                                     .prefetch_related(prefetch)\
-                                     .prefetch_related('author')[:5]\
-                                     .fetch_with_comments_count()
 
     related_posts = tag.posts.prefetch_related(prefetch)\
-                             .prefetch_related('author')\
+                             .select_related('author')\
                              .fetch_with_comments_count()[:20]
 
     context = {
